@@ -5,8 +5,9 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pipeline.transform import compute_heat_index, compute_cpcb_aqi
 from ml.risk_score import compute_heat_risk_score, tier_name
-from services.translation import compute_safe_window, translate
+from services.translation import compute_safe_window, translate, enso_narrative
 from services.source_inference import infer_sources, grap_stage, government_brief
+from pipeline.fetch import parse_enso_outlook_html
 
 
 def test_heat_index_below_threshold_passthrough():
@@ -73,8 +74,68 @@ def test_grap_stages():
     assert grap_stage(460)["stage"] == "IV"
 
 
+def test_enso_narrative_el_nino_monsoon_mentions_rainfall():
+    text = enso_narrative("el_nino", 7)  # July = monsoon
+    assert "monsoon" in text.lower() and "rainfall" in text.lower()
+
+
+def test_enso_narrative_el_nino_winter_mentions_pm25():
+    text = enso_narrative("el_nino", 12)  # December = winter
+    assert "pm2.5" in text.lower()
+
+
+def test_enso_narrative_neutral():
+    assert "neutral" in enso_narrative("neutral", 3).lower()
+
+
+_ENSO_OUTLOOK_FIXTURE = """
+<h1>Official NOAA CPC ENSO Probabilities</h1>
+<h2>Issued August 2026</h2>
+<table id="probabilities-table"><tbody>
+<tr><th scope="row"><abbr>JAS <span class="tooltip tooltip-right" role="tooltip">Jul Aug Sep</span></abbr></th><td>0</td><td>0</td><td>100</td></tr><tr><th scope="row"><abbr>DJF <span class="tooltip tooltip-right" role="tooltip">Dec Jan Feb</span></abbr></th><td>0</td><td>0</td><td>100</td></tr><tr><th scope="row"><abbr>FMA <span class="tooltip tooltip-right" role="tooltip">Feb Mar Apr</span></abbr></th><td>0</td><td>3</td><td>97</td></tr>
+</tbody></table>
+"""
+
+
+def test_enso_outlook_parses_issuance_and_rows():
+    rows = parse_enso_outlook_html(_ENSO_OUTLOOK_FIXTURE)
+    assert len(rows) == 3
+    assert rows[0] == {"year": 2026, "month": 8, "season": "JAS",
+                       "el_nino_pct": 0, "neutral_pct": 0, "la_nina_pct": 100,
+                       "issued_year": 2026, "issued_month": 8}
+
+
+def test_enso_outlook_rolls_year_forward_past_december():
+    rows = parse_enso_outlook_html(_ENSO_OUTLOOK_FIXTURE)
+    djf = next(r for r in rows if r["season"] == "DJF")
+    assert djf["year"] == 2027  # issued Aug 2026; DJF's centre month (Jan) is next year
+
+
+def test_enso_outlook_missing_header_raises():
+    import pytest
+    with pytest.raises(RuntimeError):
+        parse_enso_outlook_html("<html>no data here</html>")
+
+
 def test_government_brief_shape():
     b = government_brief("Delhi", datetime(2025, 11, 10, 21), 420, 260, 380, 3, 65)
     assert b["grap_stage"]["stage"] == "III"
     assert len(b["likely_dominant_sources"]) == 3
     assert all("short_term_actions" in s for s in b["all_sources"])
+
+
+def test_grap_not_applicable_outside_delhi_ncr():
+    # Mumbai isn't in GRAP_APPLICABLE_CITIES: even at a severe AQI, grap_stage
+    # must stay null rather than implying CAQM's Delhi-NCR framework applies.
+    b = government_brief("Mumbai", datetime(2025, 11, 10, 21), 420, 260, 380, 3, 65)
+    assert b["grap_applicable"] is False
+    assert b["grap_stage"] is None
+    assert b["aqi_category"] == "Severe"
+
+
+def test_unknown_city_uses_generic_prior_not_delhi_citations():
+    b = government_brief("Mumbai", datetime(2025, 11, 10, 21), 150, 80, 140, 5, 55)
+    assert b["used_generic_source_prior"] is True
+    assert "stubble_burning" not in [s["source"] for s in b["all_sources"]]
+    refs = b["likely_dominant_sources"][0]["apportionment_refs"]
+    assert any("no published city-specific" in r.lower() for r in refs)

@@ -75,7 +75,11 @@ def openmeteo_hourly_to_df(payload: dict, city_id: int, kind: str) -> pd.DataFra
         })
         if "co" in df:
             df["co"] = df["co"] / 1000.0  # Open-Meteo ug/m3 -> CPCB mg/m3
-        df["aqi_cpcb"] = df.apply(compute_cpcb_aqi, axis=1)
+        # aqi_cpcb is deliberately NOT computed here — Open-Meteo's AQ (CAMS)
+        # feed frequently has None pollutants in its most recent hours (the
+        # model run hasn't finished ingesting them yet); clean_air_quality()
+        # gap-fills those first, so aqi_cpcb is computed there instead, after
+        # filling — otherwise "now" almost always shows a null AQI.
     return df
 
 
@@ -97,4 +101,32 @@ def clean_air_quality(df: pd.DataFrame) -> pd.DataFrame:
         if col in df:
             df.loc[df[col] < 0, col] = np.nan
             df[col] = df[col].ffill(limit=4)          # AQ: conservative 4h fill only
+    df["aqi_cpcb"] = df.apply(compute_cpcb_aqi, axis=1)   # after fill, not before
     return df.drop_duplicates(subset=["city_id", "ts"]).reset_index(drop=True)
+
+
+def aqicn_to_df(payload: dict, city_id: int) -> pd.DataFrame:
+    """AQICN ground-station reading -> one-row frame matching the air_quality
+    schema, source='aqicn'. Real-world station data is typically far fresher
+    than Open-Meteo's CAMS model feed (which can lag 1-2 days), so this is
+    the preferred 'current AQI' source when a free AQICN token is configured.
+
+    We only take AQICN's raw pollutant concentrations (iaqi.*.v) and compute
+    aqi_cpcb ourselves via compute_cpcb_aqi — AQICN's own top-level 'aqi'
+    figure isn't guaranteed to be on the CPCB scale, and mixing index
+    methodologies under one 'AQI (CPCB)' label would be misleading.
+    """
+    d = payload["data"]
+    iaqi = d.get("iaqi", {})
+    row = {
+        "city_id": city_id,
+        "ts": pd.to_datetime(d["time"]["s"]),
+        "pm25": iaqi.get("pm25", {}).get("v"),
+        "pm10": iaqi.get("pm10", {}).get("v"),
+        "no2": iaqi.get("no2", {}).get("v"),
+        "o3": iaqi.get("o3", {}).get("v"),
+        "so2": iaqi.get("so2", {}).get("v"),
+        "source": "aqicn",
+    }
+    row["aqi_cpcb"] = compute_cpcb_aqi(row)
+    return pd.DataFrame([row])

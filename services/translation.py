@@ -4,6 +4,42 @@ from __future__ import annotations
 import sys, os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from data.reference.reference_tables import SPORT_LIMITS
+from config import IGP_CITIES
+
+
+def enso_narrative(phase: str, month: int, city: str | None = None) -> str:
+    """Plain-language explanation of what the current ENSO phase means for
+    India right now, mirroring the oni_x_monsoon / oni_x_winter interaction
+    terms the ML models are actually trained on (see ml/features.py). The
+    winter clause is IGP-specific (Indo-Gangetic-plain inversion/PM2.5) —
+    only stated for cities where that's actually the physical mechanism."""
+    is_monsoon = month in (6, 7, 8, 9)
+    is_winter = month in (11, 12, 1)
+    is_igp = city in IGP_CITIES if city else False
+
+    if phase == "el_nino":
+        if is_monsoon:
+            return ("El Niño is active during the monsoon — historically linked to a "
+                    "weaker, rainfall-deficient monsoon and hotter summers across India.")
+        if is_winter:
+            if is_igp:
+                return ("El Niño is active in winter — historically linked to weaker "
+                        "ventilation over the Indo-Gangetic plain, worsening PM2.5 "
+                        "accumulation episodes here.")
+            return ("El Niño is active in winter. Its clearest winter effect in India is "
+                    "worsened PM2.5 accumulation over the Indo-Gangetic plain (Delhi, "
+                    "Lucknow) from weaker ventilation — a less direct driver here.")
+        return ("El Niño is active. Its clearest effects in India show up during the monsoon "
+                "(rainfall deficit) and winter (pollution accumulation in the north).")
+    if phase == "la_nina":
+        if is_monsoon:
+            return ("La Niña is active during the monsoon — historically linked to a "
+                    "stronger-than-average monsoon and above-normal rainfall.")
+        if is_winter:
+            return ("La Niña is active in winter — winter ventilation patterns tend to be "
+                    "less disrupted than in an El Niño winter.")
+        return "La Niña is active, generally associated with a wetter monsoon outlook."
+    return "ENSO is neutral — neither El Niño nor La Niña is meaningfully influencing conditions right now."
 
 
 def compute_safe_window(hourly: list[dict], threshold: int = 40) -> dict:
@@ -36,7 +72,10 @@ def sport_verdict(sport: str, temp_c, aqi, uv) -> dict:
         breaches.append(f"AQI {aqi:.0f} exceeds {max_aqi} limit")
     if uv is not None and uv > max_uv:
         breaches.append(f"UV {uv:.0f} exceeds {max_uv} limit")
-    return {"sport": sport, "playable": not breaches, "breaches": breaches}
+    return {
+        "sport": sport, "playable": not breaches, "breaches": breaches,
+        "limits": {"max_temp_c": max_t, "max_aqi": max_aqi, "max_uv": max_uv},
+    }
 
 
 def translate(risk_score: int, temp_c, aqi, uv, humidity, sport: str,

@@ -52,6 +52,22 @@ CREATE TABLE IF NOT EXISTS enso_index (
     UNIQUE (year, month)
 );
 
+-- Official NOAA CPC/IRI probabilistic ENSO forecast: a genuine forward outlook
+-- (unlike enso_index, which is current/historical only). Re-issued ~monthly —
+-- fully replaced on each load (see pipeline/load.py:replace_all), not upserted.
+CREATE TABLE IF NOT EXISTS enso_outlook (
+    id            BIGSERIAL PRIMARY KEY,
+    year          INTEGER NOT NULL,      -- target season's centre-month year
+    month         INTEGER NOT NULL,      -- target season's centre month
+    season        TEXT NOT NULL,         -- e.g. 'JAS'
+    el_nino_pct   INTEGER NOT NULL,
+    neutral_pct   INTEGER NOT NULL,
+    la_nina_pct   INTEGER NOT NULL,
+    issued_year   INTEGER NOT NULL,      -- when CPC published this forecast
+    issued_month  INTEGER NOT NULL,
+    UNIQUE (year, month)
+);
+
 CREATE TABLE IF NOT EXISTS predictions (
     id              BIGSERIAL PRIMARY KEY,
     city_id         INTEGER NOT NULL REFERENCES cities(id),

@@ -79,6 +79,20 @@ SOURCE_APPORTIONMENT = {
     },
 }
 
+# Fallback prior for any city without a specific encoded study above (used by
+# infer_sources() for Mumbai/Chennai/Kolkata/Hyderabad/Pune/etc.). Deliberately
+# omits Delhi-specific categories (stubble_burning, biomass_residential_burning)
+# that don't generalise nationally, and its refs say plainly that this is NOT a
+# published city-specific study — silently reusing Delhi's IIT-Kanpur/TERI
+# citations for an unrelated city would misattribute real research.
+GENERIC_URBAN_PRIOR = {
+    "vehicular": (30, 45), "road_construction_dust": (15, 25),
+    "industry_power": (10, 20), "secondary_aerosols": (10, 20),
+    "waste_burning": (5, 15),
+    "refs": ["No published city-specific source-apportionment study encoded — "
+             "indicative generic urban shares only; verify locally before use."],
+}
+
 # ---------------------------------------------------------------------------
 # 2. Source -> intervention mapping (policy recommendations, each with evidence)
 # ---------------------------------------------------------------------------
@@ -198,3 +212,20 @@ def season_of(month: int) -> str:
     if month in (7, 8, 9):
         return "monsoon"
     return "post_monsoon"  # 10, 11
+
+
+# National CPCB AQI categories (apply everywhere in India, unlike GRAP which
+# is Delhi-NCR-specific policy machinery).
+_AQI_CATEGORIES = [
+    (0, 50, "Good"), (51, 100, "Satisfactory"), (101, 200, "Moderate"),
+    (201, 300, "Poor"), (301, 400, "Very Poor"), (401, 500, "Severe"),
+]
+
+
+def aqi_category(aqi: float | None) -> str | None:
+    if aqi is None:
+        return None
+    for lo, hi, label in _AQI_CATEGORIES:
+        if lo <= aqi <= hi:
+            return label
+    return "Severe" if aqi > 500 else None

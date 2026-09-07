@@ -83,6 +83,23 @@ class EnsoIndex(Base):
     __table_args__ = (UniqueConstraint("year", "month", name="uq_enso_ym"),)
 
 
+class EnsoOutlook(Base):
+    """Official NOAA CPC/IRI probabilistic ENSO forecast — a genuine forward
+    outlook (unlike EnsoIndex, which is current/historical). Re-issued monthly,
+    so rows are fully replaced each load rather than append-only upserted."""
+    __tablename__ = "enso_outlook"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    year: Mapped[int] = mapped_column(Integer)
+    month: Mapped[int] = mapped_column(Integer)
+    season: Mapped[str] = mapped_column(Text)
+    el_nino_pct: Mapped[int] = mapped_column(Integer)
+    neutral_pct: Mapped[int] = mapped_column(Integer)
+    la_nina_pct: Mapped[int] = mapped_column(Integer)
+    issued_year: Mapped[int] = mapped_column(Integer)
+    issued_month: Mapped[int] = mapped_column(Integer)
+    __table_args__ = (UniqueConstraint("year", "month", name="uq_enso_outlook_ym"),)
+
+
 class Prediction(Base):
     __tablename__ = "predictions"
     id: Mapped[int] = mapped_column(BigInteger().with_variant(Integer, "sqlite"),
@@ -154,3 +171,18 @@ def upsert_df(df: pd.DataFrame, model: type[Base], conflict_cols: list[str]) -> 
                 conn.execute(insert(model.__table__), batch)
     logger.info("upserted %d rows into %s", len(records), model.__tablename__)
     return len(records)
+
+
+def replace_all(df: pd.DataFrame, model: type[Base]) -> int:
+    """Full replace (delete-then-insert), for small tables that are re-issued
+    wholesale each run rather than appended to (e.g. EnsoOutlook — a forecast
+    that gets revised, not an immutable historical record)."""
+    cols = [c.name for c in model.__table__.columns if c.name != "id"]
+    with engine.begin() as conn:
+        conn.execute(model.__table__.delete())
+        if not df.empty:
+            records = df[[c for c in cols if c in df.columns]] \
+                        .where(pd.notna(df), None).to_dict(orient="records")
+            conn.execute(insert(model.__table__), records)
+    logger.info("replaced %s with %d rows", model.__tablename__, len(df))
+    return len(df)

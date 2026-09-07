@@ -17,8 +17,9 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import CITIES
 from pipeline.fetch import (fetch_all_live, fetch_weather_archive,
                             fetch_air_quality, fetch_oni)
-from pipeline.transform import openmeteo_hourly_to_df, clean_weather, clean_air_quality
-from pipeline.load import (init_db, upsert_df, WeatherData, AirQuality, EnsoIndex)
+from pipeline.transform import openmeteo_hourly_to_df, clean_weather, clean_air_quality, aqicn_to_df
+from pipeline.load import (init_db, upsert_df, replace_all,
+                           WeatherData, AirQuality, EnsoIndex, EnsoOutlook)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("etl")
@@ -30,6 +31,8 @@ def run_live() -> None:
 
     if "oni" in raw:
         upsert_df(pd.DataFrame(raw["oni"]), EnsoIndex, ["year", "month"])
+    if "enso_outlook" in raw:
+        replace_all(pd.DataFrame(raw["enso_outlook"]), EnsoOutlook)
 
     for cid in CITIES:
         if f"wx_{cid}" in raw:
@@ -38,6 +41,8 @@ def run_live() -> None:
         if f"aq_{cid}" in raw:
             aq = clean_air_quality(openmeteo_hourly_to_df(raw[f"aq_{cid}"], cid, "aq"))
             upsert_df(aq, AirQuality, ["city_id", "ts", "source"])
+        if f"aqicn_{cid}" in raw:
+            upsert_df(aqicn_to_df(raw[f"aqicn_{cid}"], cid), AirQuality, ["city_id", "ts", "source"])
     logger.info("live ETL complete")
 
 

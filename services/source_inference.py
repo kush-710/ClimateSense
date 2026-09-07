@@ -13,7 +13,9 @@ import sys, os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from data.reference.reference_tables import (
-    SOURCE_APPORTIONMENT, INTERVENTIONS, GRAP_STAGES, season_of)
+    SOURCE_APPORTIONMENT, GENERIC_URBAN_PRIOR, INTERVENTIONS, GRAP_STAGES,
+    season_of, aqi_category)
+from config import GRAP_APPLICABLE_CITIES
 
 
 def _modifiers(source: str, ts: datetime, wind_kph: float | None,
@@ -48,8 +50,12 @@ def _modifiers(source: str, ts: datetime, wind_kph: float | None,
 def infer_sources(city: str, ts: datetime, pm25: float | None, pm10: float | None,
                   wind_kph: float | None, humidity: float | None) -> list[dict]:
     season = season_of(ts.month)
-    prior = SOURCE_APPORTIONMENT.get(city, SOURCE_APPORTIONMENT["Delhi"]).get(
-        season, SOURCE_APPORTIONMENT["Delhi"]["winter"])
+    if city in SOURCE_APPORTIONMENT:
+        prior = SOURCE_APPORTIONMENT[city].get(season, SOURCE_APPORTIONMENT[city]["winter"])
+    else:
+        # No published city-specific study encoded — use the generic national
+        # prior rather than silently mislabeling another city's real citations.
+        prior = GENERIC_URBAN_PRIOR
     refs = prior.get("refs", [])
     ratio = (pm25 / pm10) if pm25 and pm10 and pm10 > 0 else None
 
@@ -97,14 +103,18 @@ def government_brief(city: str, ts: datetime, aqi: float | None, pm25: float | N
     """The deliverable for the policy audience: current stage + ranked sources +
     concrete interventions with responsible agencies."""
     sources = infer_sources(city, ts, pm25, pm10, wind_kph, humidity)
-    stage = grap_stage(aqi)
+    grap_applicable = city in GRAP_APPLICABLE_CITIES
     return {
         "city": city,
         "as_of": ts.isoformat(),
         "aqi_cpcb": aqi,
+        "aqi_category": aqi_category(aqi),   # national CPCB scale — applies everywhere
         "pm25": pm25,
         "pm10": pm10,
-        "grap_stage": stage,
+        "grap_applicable": grap_applicable,  # GRAP is Delhi-NCR-specific policy machinery
+        "grap_stage": grap_stage(aqi) if grap_applicable else None,
+        "grap_reference": GRAP_STAGES,
+        "used_generic_source_prior": city not in SOURCE_APPORTIONMENT,
         "likely_dominant_sources": sources[:3],
         "all_sources": sources,
         "methodology_note": (
