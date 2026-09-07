@@ -1,0 +1,20 @@
+name: climatesense-etl
+on:
+  schedule:
+    - cron: "*/30 * * * *"        # every 30 min
+  workflow_dispatch: {}
+
+jobs:
+  etl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11", cache: pip }
+      - run: pip install -r requirements-etl.txt
+      - name: Run live ETL
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          AQICN_TOKEN:  ${{ secrets.AQICN_TOKEN }}
+        run: python pipeline/run_etl.py live

@@ -1,0 +1,7 @@
+# Minimal deps for the scheduled ETL job (fast CI installs, no ML libs)
+aiohttp>=3.9
+tenacity>=8.2
+pandas>=2.1
+numpy>=1.26
+SQLAlchemy>=2.0
+psycopg2-binary>=2.9
