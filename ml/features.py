@@ -71,6 +71,12 @@ def add_features(df: pd.DataFrame) -> pd.DataFrame:
     df["month_sin"], df["month_cos"] = np.sin(2*np.pi*m/12), np.cos(2*np.pi*m/12)
     df["is_weekend"] = (df["ts"].dt.dayofweek >= 5).astype(int)
 
+    # Open-Meteo's archive endpoint never populates uv_index (only the forecast
+    # endpoint does), so every historical daytime row is NaN here. Without this
+    # fallback the final dropna in training_frame() silently discards all daytime
+    # history, training only on night hours and losing the peak-heat episodes.
+    df["uv_index"] = df["uv_index"].fillna(0)
+
     df["temp_lag_1h"] = df["temp_c"].shift(1)
     df["pm25_lag_3h"] = df["pm25"].shift(3)
     df["temp_roll_6h_mean"] = df["temp_c"].rolling(6, min_periods=3).mean()

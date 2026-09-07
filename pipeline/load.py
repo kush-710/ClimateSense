@@ -124,25 +124,33 @@ def init_db() -> None:
 
 
 def upsert_df(df: pd.DataFrame, model: type[Base], conflict_cols: list[str]) -> int:
-    """Idempotent bulk upsert. Uses dialect-native ON CONFLICT DO NOTHING."""
+    """Idempotent bulk upsert. Uses dialect-native ON CONFLICT DO NOTHING.
+
+    Batched to stay under SQLite's bound-parameter ceiling (SQLITE_MAX_VARIABLE_NUMBER,
+    999 on many builds) — a single-statement insert of a multi-year hourly seed would
+    otherwise raise 'too many SQL variables'. Batching is harmless on Postgres too.
+    """
     if df.empty:
         return 0
     cols = [c.name for c in model.__table__.columns if c.name != "id"]
     records = df[[c for c in cols if c in df.columns]].where(pd.notna(df), None) \
                                                       .to_dict(orient="records")
     dialect = engine.dialect.name
+    batch_size = max(1, 900 // max(1, len(cols)))
     with engine.begin() as conn:
-        if dialect == "postgresql":
-            from sqlalchemy.dialects.postgresql import insert as pg_insert
-            stmt = pg_insert(model.__table__).values(records)
-            stmt = stmt.on_conflict_do_nothing(index_elements=conflict_cols)
-            conn.execute(stmt)
-        elif dialect == "sqlite":
-            from sqlalchemy.dialects.sqlite import insert as lite_insert
-            stmt = lite_insert(model.__table__).values(records)
-            stmt = stmt.on_conflict_do_nothing(index_elements=conflict_cols)
-            conn.execute(stmt)
-        else:
-            conn.execute(insert(model.__table__), records)
+        for i in range(0, len(records), batch_size):
+            batch = records[i:i + batch_size]
+            if dialect == "postgresql":
+                from sqlalchemy.dialects.postgresql import insert as pg_insert
+                stmt = pg_insert(model.__table__).values(batch)
+                stmt = stmt.on_conflict_do_nothing(index_elements=conflict_cols)
+                conn.execute(stmt)
+            elif dialect == "sqlite":
+                from sqlalchemy.dialects.sqlite import insert as lite_insert
+                stmt = lite_insert(model.__table__).values(batch)
+                stmt = stmt.on_conflict_do_nothing(index_elements=conflict_cols)
+                conn.execute(stmt)
+            else:
+                conn.execute(insert(model.__table__), batch)
     logger.info("upserted %d rows into %s", len(records), model.__tablename__)
     return len(records)

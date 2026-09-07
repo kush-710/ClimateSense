@@ -97,25 +97,49 @@ def train_xgboost(city_id: int):
     logger.info("XGBoost training rows=%d features=%d tiers=%s",
                 len(X), len(feats), y.value_counts().to_dict())
 
+    # objective/num_class are deliberately NOT pinned here: an early walk-forward
+    # fold can legitimately contain fewer than 4 risk tiers (HIGH/CRITICAL are rare
+    # events), and forcing num_class=4 while a fold's y has fewer classes makes
+    # newer XGBoost sklearn-API predict() return raw per-class scores instead of
+    # argmax'd labels, breaking f1_score. Letting XGBoost infer objective/num_class
+    # per fit keeps predict() shape consistent with whatever labels that fit saw.
     tscv = TimeSeriesSplit(n_splits=5)
     scores, model = [], None
+    all_tiers = sorted(y.unique())
+    tier_names = [["SAFE", "MODERATE", "HIGH", "CRITICAL"][t] for t in all_tiers]
     for tr, va in tscv.split(X):
+        y_tr, y_va = y.iloc[tr], y.iloc[va]
+        # A chronologically early fold can be single-class (e.g. an all-SAFE
+        # stretch) — not enough signal to fit or score a fold like that.
+        if y_tr.nunique() < 2:
+            continue
+        # HIGH/CRITICAL are rare and can appear in the validation slice before
+        # the training slice has ever seen them. Early stopping needs the eval
+        # set's labels to fit inside the fitted class space, and "mlogloss" only
+        # makes sense once XGBoost has actually inferred a multi-class objective
+        # (a 2-class fold auto-picks binary:logistic, for which mlogloss hard-
+        # crashes) — skip eval_set/early stopping whenever either doesn't hold.
+        can_eval = set(y_va.unique()) <= set(y_tr.unique()) and y_tr.nunique() >= 3
         model = xgb.XGBClassifier(
             n_estimators=400, max_depth=7, learning_rate=0.02,
             subsample=0.8, colsample_bytree=0.75, min_child_weight=5, gamma=0.1,
-            objective="multi:softprob", num_class=4,
-            eval_metric="mlogloss", early_stopping_rounds=25, n_jobs=-1)
-        model.fit(X.iloc[tr], y.iloc[tr],
-                  eval_set=[(X.iloc[va], y.iloc[va])], verbose=False)
-        scores.append(f1_score(y.iloc[va], model.predict(X.iloc[va]), average="weighted"))
+            eval_metric="mlogloss" if can_eval else None,
+            early_stopping_rounds=25 if can_eval else None, n_jobs=-1)
+        if can_eval:
+            model.fit(X.iloc[tr], y_tr, eval_set=[(X.iloc[va], y_va)], verbose=False)
+        else:
+            model.fit(X.iloc[tr], y_tr)
+        scores.append(f1_score(y_va, model.predict(X.iloc[va]), average="weighted"))
+    if not scores:
+        raise RuntimeError("Every walk-forward fold was single-class — seed more history")
     logger.info("XGBoost walk-forward F1(weighted)=%.3f +/- %.3f",
                 np.mean(scores), np.std(scores))
     logger.info("\n%s", classification_report(
         y.iloc[va], model.predict(X.iloc[va]),
-        target_names=["SAFE", "MODERATE", "HIGH", "CRITICAL"], zero_division=0))
+        labels=all_tiers, target_names=tier_names, zero_division=0))
 
     final = xgb.XGBClassifier(**{k: v for k, v in model.get_params().items()
-                                 if k != "early_stopping_rounds"})
+                                 if k not in ("early_stopping_rounds", "objective", "num_class")})
     final.fit(X, y)
     bundle = {"model": final, "features": feats,
               "cv_f1_mean": float(np.mean(scores)), "cv_f1_std": float(np.std(scores))}
