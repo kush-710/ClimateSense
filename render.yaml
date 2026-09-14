@@ -12,14 +12,15 @@ services:
     name: climatesense-api
     runtime: python
     plan: free
-    # Prophet and XGBoost publish wheels well ahead of the newest Python, so
-    # pin to 3.11 rather than letting Render pick a version that has to build
-    # Stan from source.
-    pythonVersion: "3.11"
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn api.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     envVars:
+      # Prophet and XGBoost publish wheels well behind the newest Python, so
+      # pin the runtime rather than letting Render pick a version that has to
+      # build Stan from source. Render reads this env var to select Python.
+      - key: PYTHON_VERSION
+        value: "3.11.9"
       # Postgres connection string (Supabase free tier works). Leave unset and
       # the app falls back to local SQLite, which is per-instance and wiped on
       # every redeploy - fine for a smoke test, not for real use.
