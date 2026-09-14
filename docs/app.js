@@ -10,12 +10,10 @@ const IS_LOCAL = ["localhost", "127.0.0.1", ""].includes(location.hostname);
 const API_BASE = IS_LOCAL ? "http://localhost:8000" : PROD_API;
 
 if (!IS_LOCAL && !PROD_API) {
-  document.addEventListener("DOMContentLoaded", () => {
-    document.body.insertAdjacentHTML("afterbegin",
-      '<div style="background:#b3223c;color:#fff;padding:10px 16px;font-size:.85rem">' +
-      'Backend URL not configured: set <code>PROD_API</code> in docs/app.js to your ' +
-      'deployed API URL, then push again.</div>');
-  });
+  // No visible warning by design: visitors should never see configuration
+  // text. The console note keeps it debuggable without putting anything on
+  // the page.
+  console.warn("PROD_API is not set in docs/app.js; API calls will not resolve.");
 }
 
 const SEVERITY_COLOR = {
