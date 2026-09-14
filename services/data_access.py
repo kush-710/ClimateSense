@@ -130,6 +130,33 @@ def today_hourly_scores(city_id: int) -> list[dict]:
     return out
 
 
+def recent_means(city_id: int, cols: list[str], hours: int = 24 * 7) -> dict:
+    """Mean of the given weather columns over the last `hours` observed rows.
+
+    Used to carry meteorological regressors forward across a Prophet horizon.
+    Done in SQL on purpose: the previous approach loaded the city's entire
+    joined history (~35k rows) and ran a row-wise apply over it just to read
+    a couple of scalars, which is far too heavy for a 512 MB instance talking
+    to a remote database on every request.
+    """
+    if not cols:
+        return {}
+    safe = [c for c in cols if c.isidentifier()]   # never interpolate raw input
+    if not safe:
+        return {}
+    now = datetime.now(IST).replace(tzinfo=None)
+    selected = ", ".join(f"AVG({c}) AS {c}" for c in safe)
+    q = text(f"""SELECT {selected} FROM (
+                     SELECT {', '.join(safe)} FROM weather_data
+                     WHERE city_id = :c AND ts <= :now
+                     ORDER BY ts DESC LIMIT :n
+                 ) recent""")
+    df = pd.read_sql(q, engine, params={"c": city_id, "now": now, "n": hours})
+    if df.empty:
+        return {}
+    return {c: (None if pd.isna(v) else float(v)) for c, v in df.iloc[0].items()}
+
+
 def latest_enso(limit: int = 6) -> pd.DataFrame:
     return pd.read_sql(
         text("SELECT * FROM enso_index ORDER BY year DESC, month DESC LIMIT :n"),

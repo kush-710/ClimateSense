@@ -88,18 +88,18 @@ def forecast_prophet(city_id: int, target: str = "temp_c", days: int = 7) -> pd.
     path = os.path.join(MODEL_DIR, f"prophet_{target}_city{city_id}.json")
     with open(path) as f:
         m = model_from_json(f.read())
+    from services.data_access import latest_enso, recent_means
+
     future = m.make_future_dataframe(periods=days, freq="D")
     # Latest ONI carried forward for the horizon (monthly signal; safe over 7 days)
-    hist = add_features(load_joined(city_id))
-    last_oni = float(hist["oni"].dropna().iloc[-1]) if hist["oni"].notna().any() else 0.0
-    future["oni"] = last_oni
+    enso = latest_enso(limit=1)
+    future["oni"] = float(enso.iloc[0]["oni"]) if not enso.empty else 0.0
     # Same carry-forward for any meteorological regressors this model was fit
-    # with - recent-week means, which beat a single noisy last reading.
-    for r in getattr(m, "extra_regressors", {}):
-        if r == "oni" or r in future:
-            continue
-        recent = hist[r].dropna().tail(24 * 7)
-        future[r] = float(recent.mean()) if len(recent) else 0.0
+    # with - recent-week means, which beat a single noisy last reading. Read
+    # straight from SQL rather than materialising the city's whole history.
+    extra = [r for r in getattr(m, "extra_regressors", {}) if r != "oni" and r not in future]
+    for name, value in recent_means(city_id, extra).items():
+        future[name] = value if value is not None else 0.0
     fc = m.predict(future).tail(days)
     return fc[["ds", "yhat", "yhat_lower", "yhat_upper"]]
 
