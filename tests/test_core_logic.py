@@ -3,9 +3,11 @@ from datetime import datetime
 import sys, os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from pipeline.transform import compute_heat_index, compute_cpcb_aqi
+from pipeline.transform import (compute_heat_index, compute_cpcb_aqi,
+                                epa_subindex_to_concentration, aqicn_to_df)
 from ml.risk_score import compute_heat_risk_score, tier_name
-from services.translation import compute_safe_window, translate, enso_narrative
+from services.translation import (compute_safe_window, translate, enso_narrative,
+                                  sport_verdict)
 from services.source_inference import infer_sources, grap_stage, government_brief
 from pipeline.fetch import parse_enso_outlook_html
 
@@ -122,6 +124,64 @@ def test_government_brief_shape():
     assert b["grap_stage"]["stage"] == "III"
     assert len(b["likely_dominant_sources"]) == 3
     assert all("short_term_actions" in s for s in b["all_sources"])
+
+
+def test_wbgt_rises_with_humidity_and_sun():
+    from pipeline.transform import compute_wbgt
+    dry_shade = compute_wbgt(38, 25, 0)
+    humid_shade = compute_wbgt(38, 75, 0)
+    humid_sun = compute_wbgt(38, 75, 850)
+    assert humid_shade > dry_shade      # humidity blocks evaporative cooling
+    assert humid_sun > humid_shade      # solar load adds the globe term
+    assert 20 < dry_shade < 40          # physically plausible range
+
+
+def test_wbgt_flags_unplayable_for_marathon():
+    # Hot, humid, full sun: WBGT well past the 26C marathon limit.
+    from pipeline.transform import compute_wbgt
+    wbgt = compute_wbgt(38, 75, 850)
+    v = sport_verdict("marathon", 38, 50, 5, wbgt)
+    assert not v["playable"]
+    assert any("WBGT" in b for b in v["breaches"])
+
+
+def test_poor_air_floors_severity_even_when_cool():
+    # A cool night under CPCB "Poor" air must not report SAFE just because
+    # AQI is only 30% of the weighted composite.
+    score = compute_heat_risk_score(22, 60, 260, 0, 0)
+    assert score >= 61 and tier_name(score) == "HIGH"
+    severe = compute_heat_risk_score(22, 60, 320, 0, 0)
+    assert tier_name(severe) == "CRITICAL"
+
+
+def test_safe_window_excludes_the_middle_of_the_night():
+    # Only 2-4am and 7-9am are "safe"; the night block must not be offered.
+    hourly = [{"hour": h, "risk_score": 20 if h in (2, 3, 4, 7, 8, 9) else 80}
+              for h in range(24)]
+    win = compute_safe_window(hourly)
+    assert win["has_window"] and win["start"] == "07:00"
+
+
+def test_epa_subindex_inverts_to_concentration():
+    # EPA sub-index 107 sits in the 101-150 band (35.5-55.4 ug/m3).
+    # Live cross-check: AQICN reported pm25 sub-index 107 for Delhi while
+    # IQAir/aqi.in reported ~39 ug/m3 for the same period.
+    conc = epa_subindex_to_concentration("pm25", 107)
+    assert 36 <= conc <= 41
+
+
+def test_aqicn_row_keeps_pm10_above_pm25():
+    # PM10 includes PM2.5, so its concentration can never be lower. AQICN's
+    # raw sub-indices violate this (pm25=107 > pm10=65), which is what
+    # exposed the units bug - after conversion the ordering must be correct.
+    payload = {"data": {"time": {"s": "2026-09-14 23:00:00"},
+                        "iaqi": {"pm25": {"v": 107}, "pm10": {"v": 65}}}}
+    row = aqicn_to_df(payload, 1).iloc[0]
+    assert row["pm10"] > row["pm25"]
+    # CPCB AQI is the max sub-index, and the converted PM10 (~83 ug/m3)
+    # dominates PM2.5 (~38) here. The point is it lands on the CPCB scale
+    # rather than echoing EPA's 107 or the old bug's 257.
+    assert 78 <= row["aqi_cpcb"] <= 90
 
 
 def test_grap_not_applicable_outside_delhi_ncr():

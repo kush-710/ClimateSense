@@ -23,17 +23,17 @@ def _with_latest_aq(wx: pd.DataFrame, city_id: int) -> pd.DataFrame:
     an exact-timestamp match.
 
     Open-Meteo's AQ (CAMS model) feed routinely lags the weather feed by up
-    to a day or two — its trailing hours are often still None while the
-    model run finishes — so an exact `a.ts = w.ts` join returns null AQI for
+    to a day or two - its trailing hours are often still None while the
+    model run finishes - so an exact `a.ts = w.ts` join returns null AQI for
     literally every 'current' observation, not just an occasional gap.
     """
     # Only rows with an actual computed AQI: Open-Meteo's CAMS feed can have
     # gaps longer than clean_air_quality()'s conservative 4h ffill window
     # (observed: 14+ consecutive null hours), so the single most recent row
-    # can itself be null — skip straight to the last real reading instead.
-    # Sourced from both 'open-meteo' (CAMS model, complete hourly coverage —
+    # can itself be null - skip straight to the last real reading instead.
+    # Sourced from both 'open-meteo' (CAMS model, complete hourly coverage -
     # what the ML models train on) and 'aqicn' (real ground stations, when a
-    # free token is configured — usually far fresher). Neither is preferred
+    # free token is configured - usually far fresher). Neither is preferred
     # by name: whichever has the more recent actual reading wins, since
     # that's the more accurate "current" value regardless of source; ties
     # (same timestamp from both) favour the station reading.
@@ -43,7 +43,7 @@ def _with_latest_aq(wx: pd.DataFrame, city_id: int) -> pd.DataFrame:
         engine, params={"c": city_id}, parse_dates=["ts"])
     if aq.empty:
         return wx.assign(aqi_cpcb=None, pm25=None, pm10=None, aq_observed_at=None, aq_source=None)
-    aq["_pref"] = (aq["source"] != "aqicn").astype(int)  # 0=aqicn, 1=other — lower wins ties
+    aq["_pref"] = (aq["source"] != "aqicn").astype(int)  # 0=aqicn, 1=other - lower wins ties
     aq = aq.sort_values(["ts", "_pref"]).drop_duplicates(subset="ts", keep="first").drop(columns="_pref")
     merged = pd.merge_asof(
         wx.sort_values("ts"),
@@ -54,18 +54,58 @@ def _with_latest_aq(wx: pd.DataFrame, city_id: int) -> pd.DataFrame:
 
 def latest_observation(city_id: int) -> dict:
     # weather_data holds the FULL 7-day forecast from every live pull, not
-    # just the current hour — a bare ORDER BY ts DESC grabs the far edge of
+    # just the current hour - a bare ORDER BY ts DESC grabs the far edge of
     # next week's forecast, not "now". Bound to ts <= real current time so
     # this can only ever return an actual-or-just-passed hour.
     now = datetime.now(IST).replace(tzinfo=None)
     wx = pd.read_sql(
-        text("""SELECT ts, temp_c, humidity_pct, wind_kph, uv_index, heat_index_c
+        text("""SELECT ts, temp_c, humidity_pct, wind_kph, uv_index, heat_index_c,
+                       solar_wm2, wbgt_c, pressure_hpa
                 FROM weather_data WHERE city_id=:c AND ts <= :now
                 ORDER BY ts DESC LIMIT 1"""),
         engine, params={"c": city_id, "now": now}, parse_dates=["ts"])
     if wx.empty:
-        raise HTTPException(404, "No data — run the ETL first")
+        raise HTTPException(404, "No data - run the ETL first")
     return _with_latest_aq(wx, city_id).iloc[0].to_dict()
+
+
+def forecast_observation(city_id: int, hours_ahead: int = 24) -> dict | None:
+    """The forecast weather row closest to now + `hours_ahead`.
+
+    weather_data holds Open-Meteo's full 7-day hourly forecast alongside past
+    observations, so a forward-looking row is already there - no extra call.
+    Air quality is carried from the latest real reading, since the CAMS feed
+    doesn't reliably forecast that far ahead.
+    """
+    target = datetime.now(IST).replace(tzinfo=None, minute=0, second=0, microsecond=0) \
+             + timedelta(hours=hours_ahead)
+    wx = pd.read_sql(
+        text("""SELECT ts, temp_c, humidity_pct, wind_kph, uv_index, heat_index_c,
+                       solar_wm2, wbgt_c
+                FROM weather_data WHERE city_id=:c AND ts >= :t
+                ORDER BY ts ASC LIMIT 1"""),
+        engine, params={"c": city_id, "t": target}, parse_dates=["ts"])
+    if wx.empty:
+        return None
+    return _with_latest_aq(wx, city_id).iloc[0].to_dict()
+
+
+def uv_peak_today(city_id: int) -> dict | None:
+    """Highest UV index forecast for today, and the hour it occurs.
+
+    UV reads 0 all night, so the current value alone looks like missing data.
+    """
+    start = datetime.now(IST).replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
+    df = pd.read_sql(
+        text("""SELECT ts, uv_index FROM weather_data
+                WHERE city_id=:c AND ts >= :start AND ts < :end AND uv_index IS NOT NULL
+                ORDER BY uv_index DESC LIMIT 1"""),
+        engine, params={"c": city_id, "start": start, "end": start + timedelta(days=1)},
+        parse_dates=["ts"])
+    if df.empty:
+        return None
+    r = df.iloc[0]
+    return {"uv_index": float(r["uv_index"]), "hour": int(pd.Timestamp(r["ts"]).hour)}
 
 
 def today_hourly_scores(city_id: int) -> list[dict]:
@@ -78,14 +118,14 @@ def today_hourly_scores(city_id: int) -> list[dict]:
     start = datetime.now(IST).replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
     end = start + timedelta(days=1)
     wx = pd.read_sql(
-        text("""SELECT ts, temp_c, humidity_pct, uv_index FROM weather_data
+        text("""SELECT ts, temp_c, humidity_pct, uv_index, solar_wm2 FROM weather_data
                 WHERE city_id=:c AND ts >= :start AND ts < :end ORDER BY ts"""),
         engine, params={"c": city_id, "start": start, "end": end}, parse_dates=["ts"])
     merged = _with_latest_aq(wx, city_id)
     out = []
     for _, r in merged.iterrows():
         s = compute_heat_risk_score(r["temp_c"], r["humidity_pct"],
-                                    r["aqi_cpcb"], r["uv_index"])
+                                    r["aqi_cpcb"], r["uv_index"], r.get("solar_wm2"))
         out.append({"hour": int(pd.Timestamp(r["ts"]).hour), "risk_score": s})
     return out
 

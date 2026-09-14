@@ -80,7 +80,7 @@ async def fetch_air_quality(session: aiohttp.ClientSession, lat: float, lon: flo
 
 @retry(**RETRY)
 async def fetch_aqicn_live(session: aiohttp.ClientSession, slug: str) -> dict:
-    """Live station reading — used for the dashboard 'now' card and cross-validation
+    """Live station reading - used for the dashboard 'now' card and cross-validation
     of the CAMS model values from Open-Meteo."""
     url = AQICN_FEED.format(slug=slug)
     async with session.get(url, params={"token": AQICN_TOKEN},
@@ -120,7 +120,7 @@ async def fetch_oni(session: aiohttp.ClientSession) -> list[dict]:
             "season": season, "oni": oni, "phase": phase,
         })
     if not rows:
-        raise RuntimeError("ONI parse produced zero rows — file format may have changed")
+        raise RuntimeError("ONI parse produced zero rows - file format may have changed")
     return rows
 
 
@@ -136,21 +136,21 @@ _MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July",
 def parse_enso_outlook_html(html: str) -> list[dict]:
     """Pure parser for NOAA CPC's official probabilistic ENSO forecast page.
 
-    No CSV/JSON is published for this product — the page renders an HTML
+    No CSV/JSON is published for this product - the page renders an HTML
     table (id="probabilities-table") of 9 overlapping 3-month seasons, each
     with El Nino / Neutral / La Nina percentage chances. Separated from the
     network call so it's unit-testable against a fixture string.
     """
     issued = _ENSO_OUTLOOK_ISSUED_RE.search(html)
     if not issued:
-        raise RuntimeError("CPC ENSO outlook parse failed — issuance header not found "
+        raise RuntimeError("CPC ENSO outlook parse failed - issuance header not found "
                            "(page format may have changed)")
     issued_month = _MONTH_NAMES.index(issued.group(1)) + 1
     issued_year = int(issued.group(2))
 
     rows = _ENSO_OUTLOOK_ROW_RE.findall(html)
     if not rows:
-        raise RuntimeError("CPC ENSO outlook parse produced zero rows — "
+        raise RuntimeError("CPC ENSO outlook parse produced zero rows - "
                            "page format may have changed")
 
     out = []
@@ -168,7 +168,7 @@ def parse_enso_outlook_html(html: str) -> list[dict]:
 
 @retry(**RETRY)
 async def fetch_enso_outlook(session: aiohttp.ClientSession) -> list[dict]:
-    """Official NOAA CPC/IRI consensus probabilistic ENSO forecast — a genuine
+    """Official NOAA CPC/IRI consensus probabilistic ENSO forecast - a genuine
     forward-looking outlook (unlike the ONI file, which is current/historical
     only), updated roughly monthly."""
     headers = {"User-Agent": "Mozilla/5.0 (compatible; ClimateSense/1.0)"}

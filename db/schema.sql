@@ -21,6 +21,8 @@ CREATE TABLE IF NOT EXISTS weather_data (
     rainfall_mm   DOUBLE PRECISION,
     pressure_hpa  DOUBLE PRECISION,
     heat_index_c  DOUBLE PRECISION,
+    solar_wm2     DOUBLE PRECISION,      -- shortwave radiation, W/m2 (archive + forecast)
+    wbgt_c        DOUBLE PRECISION,      -- estimated outdoor Wet Bulb Globe Temperature
     UNIQUE (city_id, ts)
 );
 CREATE INDEX IF NOT EXISTS ix_weather_city_ts ON weather_data (city_id, ts DESC);
@@ -53,7 +55,7 @@ CREATE TABLE IF NOT EXISTS enso_index (
 );
 
 -- Official NOAA CPC/IRI probabilistic ENSO forecast: a genuine forward outlook
--- (unlike enso_index, which is current/historical only). Re-issued ~monthly —
+-- (unlike enso_index, which is current/historical only). Re-issued ~monthly -
 -- fully replaced on each load (see pipeline/load.py:replace_all), not upserted.
 CREATE TABLE IF NOT EXISTS enso_outlook (
     id            BIGSERIAL PRIMARY KEY,
@@ -68,29 +70,4 @@ CREATE TABLE IF NOT EXISTS enso_outlook (
     UNIQUE (year, month)
 );
 
-CREATE TABLE IF NOT EXISTS predictions (
-    id              BIGSERIAL PRIMARY KEY,
-    city_id         INTEGER NOT NULL REFERENCES cities(id),
-    generated_at    TIMESTAMPTZ NOT NULL,
-    forecast_for    TIMESTAMPTZ NOT NULL,
-    target          TEXT NOT NULL,       -- 'temp_c' | 'pm25' | 'risk_tier'
-    value           DOUBLE PRECISION,
-    lower           DOUBLE PRECISION,
-    upper           DOUBLE PRECISION,
-    model_version   TEXT,
-    UNIQUE (city_id, forecast_for, target, model_version)
-);
-CREATE INDEX IF NOT EXISTS ix_pred_city_for ON predictions (city_id, forecast_for);
-
-CREATE TABLE IF NOT EXISTS alerts (
-    id            BIGSERIAL PRIMARY KEY,
-    city_id       INTEGER NOT NULL REFERENCES cities(id),
-    created_at    TIMESTAMPTZ NOT NULL,
-    expires_at    TIMESTAMPTZ,
-    severity      TEXT NOT NULL,         -- SAFE | MODERATE | HIGH | CRITICAL
-    risk_score    INTEGER,
-    sport         TEXT,
-    body          TEXT NOT NULL,
-    is_active     BOOLEAN DEFAULT TRUE
-);
-CREATE INDEX IF NOT EXISTS ix_alerts_active ON alerts (city_id, is_active, expires_at);
+-- NOTE: `predictions` / `alerts` tables removed - defined but never used.

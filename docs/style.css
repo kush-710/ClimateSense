@@ -208,6 +208,13 @@ main {
   text-transform: uppercase; letter-spacing: 0.04em;
 }
 .general-notes { margin-bottom: 8px; }
+.model-note {
+  font-family: var(--font-mono); font-size: 0.62rem; color: var(--text-muted);
+  margin-left: 6px;
+}
+.accuracy-note {
+  font-size: 0.68rem; color: var(--text-muted); padding: 6px 2px 0; line-height: 1.4;
+}
 .severity-tag {
   display: inline-block; padding: 2px 8px; font-size: 0.68rem; font-weight: 700;
   letter-spacing: 0.06em; border-radius: var(--radius); color: #fff; margin-bottom: 10px;

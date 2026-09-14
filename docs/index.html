@@ -3,11 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ClimateSense — Environmental Risk Instrument</title>
+<title>ClimateSense - Environmental Risk Instrument</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=2">
 </head>
 <body>
 <header class="console-header">
@@ -15,13 +15,13 @@
     <div class="brand-mark">CS<span class="brand-corner tl"></span><span class="brand-corner br"></span></div>
     <div class="brand-text">
       <div class="brand-title">CLIMATESENSE</div>
-      <div class="brand-subtitle">environmental risk instrument — heat · air · el niño</div>
+      <div class="brand-subtitle">Know when it's safe to be outside - heat &amp; air-quality risk, safe hours, and 7-day forecasts</div>
     </div>
   </div>
   <div class="header-right">
     <label class="city-filter">
       <span class="city-filter-label">CITY</span>
-      <select id="city-select" class="city-select"><option>Loading…</option></select>
+      <select id="city-select" class="city-select"><option>Loading...</option></select>
     </label>
     <div class="clock" id="clock">--:--:-- IST</div>
   </div>
@@ -29,7 +29,7 @@
 
 <main>
   <section class="panel risk-panel">
-    <div class="panel-head"><h2>01 · CURRENT RISK</h2></div>
+    <div class="panel-head"><h2>01 / CURRENT RISK</h2></div>
     <div class="risk-body" id="risk-body">
       <div class="gauge-wrap">
         <svg viewBox="0 0 140 140" class="gauge">
@@ -37,7 +37,7 @@
           <circle cx="70" cy="70" r="58" class="gauge-arc" id="gauge-arc"/>
         </svg>
         <div class="gauge-center">
-          <div class="gauge-score" id="gauge-score">—</div>
+          <div class="gauge-score" id="gauge-score">-</div>
           <div class="gauge-label" id="gauge-severity">LOADING</div>
         </div>
       </div>
@@ -45,14 +45,14 @@
       <div class="subsection-head">Current Conditions <span class="subsection-note">(same for every activity)</span></div>
       <div class="metric-tiles" id="metric-tiles"></div>
       <div class="general-notes" id="general-notes"></div>
-      <div class="outlook-line" id="outlook-line">Loading outlook…</div>
+      <div class="outlook-line" id="outlook-line">Loading outlook...</div>
 
       <div class="subsection-head sport-subsection-head">
         <span>Sport Fitness Check</span>
         <select id="sport-select" class="sport-select">
           <option value="general">General activity</option>
-          <option value="cricket_fielding">Cricket — fielding</option>
-          <option value="cricket_batting">Cricket — batting</option>
+          <option value="cricket_fielding">Cricket - fielding</option>
+          <option value="cricket_batting">Cricket - batting</option>
           <option value="football">Football</option>
           <option value="marathon">Marathon / distance run</option>
           <option value="running_casual">Casual run</option>
@@ -67,7 +67,7 @@
 
   <section class="panel forecast-panel">
     <div class="panel-head">
-      <h2>02 · 7-DAY FORECAST</h2>
+      <h2>02 / 7-DAY FORECAST</h2>
       <div class="forecast-tabs">
         <button class="ftab active" data-target="temp_c">TEMP</button>
         <button class="ftab" data-target="pm25">PM2.5</button>
@@ -78,8 +78,8 @@
   </section>
 
   <section class="panel policy-panel">
-    <div class="panel-head"><h2>03 · SOURCE ATTRIBUTION &amp; POLICY BRIEF</h2></div>
-    <p class="panel-sub">GRAP (Graded Response Action Plan) — CAQM's official AQI-triggered
+    <div class="panel-head"><h2>03 / SOURCE ATTRIBUTION &amp; POLICY BRIEF</h2></div>
+    <p class="panel-sub">GRAP (Graded Response Action Plan) - CAQM's official AQI-triggered
       pollution response for Delhi-NCR. Each stage adds mandatory actions on top of the last.</p>
     <div id="grap-steps" class="grap-steps"></div>
     <div id="grap-status" class="grap-status"></div>
@@ -91,17 +91,17 @@
 <aside class="chat-panel" id="chat-panel">
   <div class="chat-header">
     <span>ASK THE INSTRUMENT</span>
-    <button id="chat-toggle" aria-label="Toggle chat">–</button>
+    <button id="chat-toggle" aria-label="Toggle chat">-</button>
   </div>
   <div class="chat-messages" id="chat-messages">
-    <div class="msg bot">Ask about heat/air-quality risk, policy actions, or the El Niño outlook for any of the 8 cities — e.g. "Is it safe to run in Chennai today?" or "Will El Nino continue this winter?"</div>
+    <div class="msg bot">Ask about heat/air-quality risk, policy actions, or the El Nino outlook for any of the 8 cities - e.g. "Is it safe to run in Chennai today?" or "Will El Nino continue this winter?"</div>
   </div>
   <form class="chat-input" id="chat-form">
-    <input type="text" id="chat-text" placeholder="Ask a question…" autocomplete="off" required>
-    <button type="submit">→</button>
+    <input type="text" id="chat-text" placeholder="Ask a question..." autocomplete="off" required>
+    <button type="submit">-></button>
   </form>
 </aside>
 
-<script src="app.js"></script>
+<script src="app.js?v=2"></script>
 </body>
 </html>

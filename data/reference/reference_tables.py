@@ -8,14 +8,14 @@ encode *published* apportionment results (IIT-Kanpur 2016 Delhi study, TERI 2018
 SAFAR, CPCB) and the platform infers which known source is *likely dominant right now*
 from season, hour, and meteorology. Every recommendation cites its evidence base.
 
-All shares are indicative ranges from the literature — verify the exact figures against
+All shares are indicative ranges from the literature - verify the exact figures against
 the cited reports before publishing, and cite them in the README/paper.
 """
 
 # ---------------------------------------------------------------------------
 # 1. Seasonal PM2.5 source apportionment (percent share ranges, city x season)
 #    season keys: winter (Nov-Jan), summer (Mar-Jun), monsoon (Jul-Sep),
-#                 post_monsoon (Oct), transition (Feb)
+#                 post_monsoon (Oct-Nov)
 # ---------------------------------------------------------------------------
 SOURCE_APPORTIONMENT = {
     "Delhi": {
@@ -44,11 +44,6 @@ SOURCE_APPORTIONMENT = {
             "road_construction_dust": (10, 15), "secondary_aerosols": (10, 20),
             "refs": ["TERI-ARAI (2018)"],
         },
-        "transition": {
-            "vehicular": (20, 30), "industry_power": (15, 25),
-            "road_construction_dust": (15, 25), "secondary_aerosols": (15, 25),
-            "refs": ["TERI-ARAI (2018)"],
-        },
     },
     "Bengaluru": {
         "winter": {
@@ -72,10 +67,6 @@ SOURCE_APPORTIONMENT = {
             "waste_burning": (10, 15),
             "refs": ["CSTEP (2022)"],
         },
-        "transition": {
-            "vehicular": (40, 50), "road_construction_dust": (15, 25),
-            "refs": ["CSTEP (2022)"],
-        },
     },
 }
 
@@ -83,13 +74,13 @@ SOURCE_APPORTIONMENT = {
 # infer_sources() for Mumbai/Chennai/Kolkata/Hyderabad/Pune/etc.). Deliberately
 # omits Delhi-specific categories (stubble_burning, biomass_residential_burning)
 # that don't generalise nationally, and its refs say plainly that this is NOT a
-# published city-specific study — silently reusing Delhi's IIT-Kanpur/TERI
+# published city-specific study - silently reusing Delhi's IIT-Kanpur/TERI
 # citations for an unrelated city would misattribute real research.
 GENERIC_URBAN_PRIOR = {
     "vehicular": (30, 45), "road_construction_dust": (15, 25),
     "industry_power": (10, 20), "secondary_aerosols": (10, 20),
     "waste_burning": (5, 15),
-    "refs": ["No published city-specific source-apportionment study encoded — "
+    "refs": ["No published city-specific source-apportionment study encoded - "
              "indicative generic urban shares only; verify locally before use."],
 }
 
@@ -168,7 +159,7 @@ INTERVENTIONS = {
 }
 
 # ---------------------------------------------------------------------------
-# 3. GRAP stage triggers (CAQM, Delhi-NCR) — maps live AQI to the official
+# 3. GRAP stage triggers (CAQM, Delhi-NCR) - maps live AQI to the official
 #    response framework so recommendations reference real policy machinery.
 # ---------------------------------------------------------------------------
 GRAP_STAGES = [

@@ -53,7 +53,7 @@ def infer_sources(city: str, ts: datetime, pm25: float | None, pm10: float | Non
     if city in SOURCE_APPORTIONMENT:
         prior = SOURCE_APPORTIONMENT[city].get(season, SOURCE_APPORTIONMENT[city]["winter"])
     else:
-        # No published city-specific study encoded — use the generic national
+        # No published city-specific study encoded - use the generic national
         # prior rather than silently mislabeling another city's real citations.
         prior = GENERIC_URBAN_PRIOR
     refs = prior.get("refs", [])
@@ -108,7 +108,7 @@ def government_brief(city: str, ts: datetime, aqi: float | None, pm25: float | N
         "city": city,
         "as_of": ts.isoformat(),
         "aqi_cpcb": aqi,
-        "aqi_category": aqi_category(aqi),   # national CPCB scale — applies everywhere
+        "aqi_category": aqi_category(aqi),   # national CPCB scale - applies everywhere
         "pm25": pm25,
         "pm10": pm10,
         "grap_applicable": grap_applicable,  # GRAP is Delhi-NCR-specific policy machinery

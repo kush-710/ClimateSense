@@ -87,7 +87,7 @@ def _build_context(city_id: int) -> dict:
         context["temp_forecast_5day"] = [
             {"date": str(r.ds.date()), "value": round(r.yhat, 2)} for r in fc.itertuples()]
     except FileNotFoundError:
-        pass  # model not trained yet for this city — assistant still works without it
+        pass  # model not trained yet for this city - assistant still works without it
 
     enso_df = latest_enso(limit=1)
     if not enso_df.empty:
@@ -106,7 +106,7 @@ def _build_context(city_id: int) -> dict:
 
     outlook_df = enso_outlook()
     if not outlook_df.empty:
-        # Real NOAA CPC/IRI probabilistic forecast — genuinely forward-looking,
+        # Real NOAA CPC/IRI probabilistic forecast - genuinely forward-looking,
         # unlike the ONI reading above which is current/historical only.
         context["enso_forecast_outlook"] = outlook_df[
             ["season", "year", "el_nino_pct", "neutral_pct", "la_nina_pct"]
@@ -119,18 +119,18 @@ def _build_prompt(question: str, city_name: str, context: dict) -> str:
     import json
     return (
         "You are ClimateSense's assistant, answering questions about heat and air-quality "
-        f"risk in {city_name}, India. Use ONLY the JSON data below to answer — do not invent "
+        f"risk in {city_name}, India. Use ONLY the JSON data below to answer - do not invent "
         "numbers or facts that aren't in it. If the data doesn't cover what's being asked, "
         "say so plainly instead of guessing. For 'how do we fix/reduce this' questions, base "
         "your answer on policy_brief.likely_dominant_sources' short_term_actions / "
         "long_term_actions / responsible_agencies (if policy_brief.used_generic_source_prior "
         "is true, mention these are generic indicative shares, not a city-specific study). "
-        "For the current El Niño/ENSO state, use enso.effect_right_now. For questions about "
+        "For the current El Nino/ENSO state, use enso.effect_right_now. For questions about "
         "the FUTURE ENSO trend (e.g. 'will El Nino continue', 'what's expected next season'), "
-        "use enso_forecast_outlook — this is a real NOAA CPC/IRI probabilistic forecast, not a "
+        "use enso_forecast_outlook - this is a real NOAA CPC/IRI probabilistic forecast, not a "
         "guess; cite the actual percentages and season. If a policy_brief.grap_stage is null "
         "and grap_applicable is false, say GRAP is a Delhi-NCR-specific framework that doesn't "
-        "apply here, and use aqi_category instead. Answer in plain language, no markdown — "
+        "apply here, and use aqi_category instead. Answer in plain language, no markdown - "
         "2-4 sentences normally, up to 6 if listing concrete policy actions or probabilities.\n\n"
         f"DATA:\n{json.dumps(context, default=str)}\n\n"
         f"QUESTION: {question}"

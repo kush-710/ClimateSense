@@ -6,3 +6,4 @@ numpy>=1.26
 SQLAlchemy>=2.0
 psycopg2-binary>=2.9
 python-dotenv>=1.0
+fastapi>=0.109        # services/data_access.py raises HTTPException; also needed by CI's pytest run

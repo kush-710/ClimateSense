@@ -3,14 +3,14 @@
 Runs unchanged on:
   - SQLite (local dev, zero cost)
   - Supabase Postgres free tier
-  - AWS RDS Postgres free tier (db.t3.micro, 12 months) — just change DATABASE_URL.
+  - AWS RDS Postgres free tier (db.t3.micro, 12 months) - just change DATABASE_URL.
 """
 from __future__ import annotations
 import logging
 
 import pandas as pd
 from sqlalchemy import (
-    create_engine, Integer, BigInteger, Float, Text, TIMESTAMP, Boolean,
+    create_engine, Integer, BigInteger, Float, Text, TIMESTAMP,
     UniqueConstraint, Index, insert,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session
@@ -50,6 +50,8 @@ class WeatherData(Base):
     rainfall_mm: Mapped[float | None] = mapped_column(Float, nullable=True)
     pressure_hpa: Mapped[float | None] = mapped_column(Float, nullable=True)
     heat_index_c: Mapped[float | None] = mapped_column(Float, nullable=True)
+    solar_wm2: Mapped[float | None] = mapped_column(Float, nullable=True)
+    wbgt_c: Mapped[float | None] = mapped_column(Float, nullable=True)
     __table_args__ = (UniqueConstraint("city_id", "ts", name="uq_weather_city_ts"),
                       Index("ix_weather_city_ts", "city_id", "ts"))
 
@@ -84,7 +86,7 @@ class EnsoIndex(Base):
 
 
 class EnsoOutlook(Base):
-    """Official NOAA CPC/IRI probabilistic ENSO forecast — a genuine forward
+    """Official NOAA CPC/IRI probabilistic ENSO forecast - a genuine forward
     outlook (unlike EnsoIndex, which is current/historical). Re-issued monthly,
     so rows are fully replaced each load rather than append-only upserted."""
     __tablename__ = "enso_outlook"
@@ -100,34 +102,11 @@ class EnsoOutlook(Base):
     __table_args__ = (UniqueConstraint("year", "month", name="uq_enso_outlook_ym"),)
 
 
-class Prediction(Base):
-    __tablename__ = "predictions"
-    id: Mapped[int] = mapped_column(BigInteger().with_variant(Integer, "sqlite"),
-                                    primary_key=True, autoincrement=True)
-    city_id: Mapped[int] = mapped_column(Integer)
-    generated_at: Mapped[str] = mapped_column(TIMESTAMP(timezone=True))
-    forecast_for: Mapped[str] = mapped_column(TIMESTAMP(timezone=True))
-    target: Mapped[str] = mapped_column(Text)
-    value: Mapped[float | None] = mapped_column(Float, nullable=True)
-    lower: Mapped[float | None] = mapped_column(Float, nullable=True)
-    upper: Mapped[float | None] = mapped_column(Float, nullable=True)
-    model_version: Mapped[str | None] = mapped_column(Text, nullable=True)
-    __table_args__ = (UniqueConstraint("city_id", "forecast_for", "target", "model_version",
-                                       name="uq_pred"),)
-
-
-class Alert(Base):
-    __tablename__ = "alerts"
-    id: Mapped[int] = mapped_column(BigInteger().with_variant(Integer, "sqlite"),
-                                    primary_key=True, autoincrement=True)
-    city_id: Mapped[int] = mapped_column(Integer)
-    created_at: Mapped[str] = mapped_column(TIMESTAMP(timezone=True))
-    expires_at: Mapped[str | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
-    severity: Mapped[str] = mapped_column(Text)
-    risk_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    sport: Mapped[str | None] = mapped_column(Text, nullable=True)
-    body: Mapped[str] = mapped_column(Text)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+# NOTE: `predictions` and `alerts` tables were removed - they were defined
+# here and in db/schema.sql but never written to or read from anywhere.
+# Forecast-vs-actual accuracy tracking is a worthwhile feature to build on a
+# `predictions` table later; it just needs a scheduled job that scores past
+# forecasts against observations, which doesn't exist yet.
 
 
 def init_db() -> None:
@@ -144,7 +123,7 @@ def upsert_df(df: pd.DataFrame, model: type[Base], conflict_cols: list[str]) -> 
     """Idempotent bulk upsert. Uses dialect-native ON CONFLICT DO NOTHING.
 
     Batched to stay under SQLite's bound-parameter ceiling (SQLITE_MAX_VARIABLE_NUMBER,
-    999 on many builds) — a single-statement insert of a multi-year hourly seed would
+    999 on many builds) - a single-statement insert of a multi-year hourly seed would
     otherwise raise 'too many SQL variables'. Batching is harmless on Postgres too.
     """
     if df.empty:
@@ -175,7 +154,7 @@ def upsert_df(df: pd.DataFrame, model: type[Base], conflict_cols: list[str]) -> 
 
 def replace_all(df: pd.DataFrame, model: type[Base]) -> int:
     """Full replace (delete-then-insert), for small tables that are re-issued
-    wholesale each run rather than appended to (e.g. EnsoOutlook — a forecast
+    wholesale each run rather than appended to (e.g. EnsoOutlook - a forecast
     that gets revised, not an immutable historical record)."""
     cols = [c.name for c in model.__table__.columns if c.name != "id"]
     with engine.begin() as conn:

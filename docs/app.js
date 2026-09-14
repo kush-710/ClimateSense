@@ -1,6 +1,22 @@
 // Set this to your deployed Render backend URL (e.g. "https://climatesense-api.onrender.com").
 // Defaults to localhost for local development against `uvicorn api.main:app --port 8000`.
-const API_BASE = "http://localhost:8000";
+// Backend URL. Paste your deployed Render URL here once (no trailing slash):
+//   const PROD_API = "https://climatesense-api.onrender.com";
+// Local development keeps using localhost automatically, so the same commit
+// works in both places and there's nothing to edit per deploy.
+const PROD_API = "";   // <-- set this after deploying the backend
+
+const IS_LOCAL = ["localhost", "127.0.0.1", ""].includes(location.hostname);
+const API_BASE = IS_LOCAL ? "http://localhost:8000" : PROD_API;
+
+if (!IS_LOCAL && !PROD_API) {
+  document.addEventListener("DOMContentLoaded", () => {
+    document.body.insertAdjacentHTML("afterbegin",
+      '<div style="background:#b3223c;color:#fff;padding:10px 16px;font-size:.85rem">' +
+      'Backend URL not configured: set <code>PROD_API</code> in docs/app.js to your ' +
+      'deployed API URL, then push again.</div>');
+  });
+}
 
 const SEVERITY_COLOR = {
   SAFE: "var(--safe)", MODERATE: "var(--moderate)",
@@ -35,7 +51,7 @@ async function apiPost(path, payload) {
 }
 
 function fmt(v, digits = 1) {
-  return v === null || v === undefined ? "—" : (Math.round(v * 10 ** digits) / 10 ** digits);
+  return v === null || v === undefined ? "-" : (Math.round(v * 10 ** digits) / 10 ** digits);
 }
 
 function renderError(el, err) {
@@ -86,7 +102,7 @@ async function loadRiskPanel() {
     arc.style.strokeDasharray = GAUGE_CIRC;
     arc.style.strokeDashoffset = offset;
     arc.style.stroke = SEVERITY_COLOR[data.severity] || "var(--safe)";
-    document.getElementById("gauge-score").textContent = data.risk_score ?? "—";
+    document.getElementById("gauge-score").textContent = data.risk_score ?? "-";
     document.getElementById("gauge-severity").textContent = data.severity;
 
     // --- Current Conditions: identical for every activity, shown once ---
@@ -102,12 +118,19 @@ async function loadRiskPanel() {
     }
     const sourceLabel = obs.aq_source === "aqicn" ? "station" : obs.aq_source === "open-meteo" ? "model" : "";
     const aqLabel = aqStale
-      ? `AQI (CPCB, ${sourceLabel}) · as of ${new Date(obs.aq_observed_at).toLocaleString("en-IN", {month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"})}`
+      ? `AQI (CPCB, ${sourceLabel}), as of ${new Date(obs.aq_observed_at).toLocaleString("en-IN", {month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"})}`
       : `AQI (CPCB${sourceLabel ? ", " + sourceLabel : ""})`;
+    // UV is 0 all night, which looks like missing data, so show today's peak
+    // alongside it for context.
+    const p = data.uv_peak_today;
+    const uvLabel = (p && (obs.uv_index === 0 || obs.uv_index == null))
+      ? `UV Index now (peak today ${p.uv_index} at ${String(p.hour).padStart(2, "0")}:00)`
+      : "UV Index";
+
     const tiles = [
-      ["temp_c", "°C", "Temp"], ["heat_index_c", "°C", "Feels like"],
+      ["temp_c", "°C", "Temp"], ["wbgt_c", "°C", "WBGT (heat stress)"],
       ["humidity_pct", "%", "Humidity"], ["wind_kph", "km/h", "Wind"],
-      ["uv_index", "", "UV Index"], ["aqi_cpcb", "", aqLabel],
+      ["uv_index", "", uvLabel], ["aqi_cpcb", "", aqLabel],
     ];
     document.getElementById("metric-tiles").innerHTML = tiles.map(([key, unit, label]) => `
       <div class="metric-tile">
@@ -116,10 +139,19 @@ async function loadRiskPanel() {
       </div>
     `).join("");
 
+    // Risk 24h out, scored from the ingested weather forecast for that hour.
+    const t = data.tomorrow;
+    const tomorrowLine = t
+      ? `<p><b>Forecast ${t.horizon_h}h ahead</b><br>
+           <span class="severity-tag severity-${t.tier_name}">${t.tier_name}</span>
+           <span class="model-note">${t.risk_score}/100, ${t.basis}</span></p>`
+      : "";
+
     document.getElementById("general-notes").innerHTML = `
       <span class="severity-tag severity-${data.severity}">${data.severity}</span>
       <p>${data.summary}</p>
       <p><b>Safe window</b><br>${data.safe_window.message}</p>
+      ${tomorrowLine}
       <p><b>Hydration</b><br>${data.hydration}</p>
       <p><b>Mask</b><br>${data.mask}</p>
     `;
@@ -127,6 +159,7 @@ async function loadRiskPanel() {
     // --- Sport Fitness Check: only this block changes with the dropdown ---
     const sv = data.sport_verdict;
     const limitRows = [
+      ["WBGT", obs.wbgt_c, sv.limits.max_wbgt_c, "°C"],
       ["Temp", obs.temp_c, sv.limits.max_temp_c, "°C"],
       ["AQI", obs.aqi_cpcb, sv.limits.max_aqi, ""],
       ["UV", obs.uv_index, sv.limits.max_uv, ""],
@@ -136,14 +169,14 @@ async function loadRiskPanel() {
       const cls = cur == null ? "" : breached ? "breach" : "ok";
       return `
         <div class="limit-cell ${cls}">
-          <div class="limit-label">${label} · ${sv.sport.replace(/_/g, " ")}</div>
+          <div class="limit-label">${label} / ${sv.sport.replace(/_/g, " ")}</div>
           <div class="limit-compare"><span class="cur">${fmt(cur)}${unit}</span> <span class="lim">/ ${lim}${unit} limit</span></div>
         </div>
       `;
     }).join("");
 
     document.getElementById("sport-notes").innerHTML = `
-      <p><b>Verdict</b><br>${sv.playable ? "Cleared to play" : "Not cleared"} —
+      <p><b>Verdict</b><br>${sv.playable ? "Cleared to play" : "Not cleared"} -
          ${sv.breaches.length ? sv.breaches.join("; ") : "no threshold breached for " + sv.sport.replace(/_/g, " ")}</p>
     `;
   } catch (err) {
@@ -154,12 +187,12 @@ async function loadRiskPanel() {
 // ---------------- outlook line (ENSO regime + real CPC forecast) ----------------
 async function loadOutlook() {
   const el = document.getElementById("outlook-line");
-  el.textContent = "Loading outlook…";
+  el.textContent = "Loading outlook...";
   try {
     const data = await apiGet(`/enso?city_id=${currentCity}`);
     const parts = [data.latest.narrative];
     if (data.outlook_headline) parts.push(data.outlook_headline + ".");
-    el.innerHTML = `<b>Outlook —</b> ${parts.join(" ")}`;
+    el.innerHTML = `<b>Outlook -</b> ${parts.join(" ")}`;
   } catch (err) {
     el.textContent = `Outlook unavailable: ${err.message}`;
   }
@@ -168,9 +201,11 @@ async function loadOutlook() {
 // ---------------- forecast chart (hand-rolled SVG line chart) ----------------
 async function loadForecastChart() {
   const el = document.getElementById("forecast-chart");
-  el.textContent = "Loading…";
+  el.textContent = "Loading...";
   try {
-    const data = await apiGet(`/forecast/${currentCity}?target=${currentForecastTarget}&days=7`);
+    const resp = await apiGet(`/forecast/${currentCity}?target=${currentForecastTarget}&days=7`);
+    const data = resp.points || [];
+    const acc = resp.accuracy;
     if (!data.length) { el.innerHTML = "<p class='error'>No forecast data.</p>"; return; }
 
     const W = 560, H = 200, PAD_L = 46, PAD_R = 12, PAD_T = 14, PAD_B = 26;
@@ -202,6 +237,13 @@ async function loadForecastChart() {
       </g>
     `).join("");
 
+    // Show how far off this model typically is, so the numbers aren't read
+    // as more precise than they are.
+    const accNote = acc
+      ? `<div class="accuracy-note">Prophet walk-forward accuracy: MAE +/-${acc.mae.toFixed(1)}${unit || " µg/m³"},
+         RMSE ${acc.rmse.toFixed(1)}. Shaded band = 80% interval.</div>`
+      : "";
+
     el.innerHTML = `
       <svg viewBox="0 0 ${W} ${H}">
         ${gridLines}
@@ -209,6 +251,7 @@ async function loadForecastChart() {
         <path class="chart-line" d="${linePath}"/>
         ${points}
       </svg>
+      ${accNote}
     `;
 
     // Explicit ML-forecasted numbers per day (Prophet yhat + 80% interval),
@@ -217,7 +260,7 @@ async function loadForecastChart() {
       <div class="forecast-day">
         <div class="fd-date">${d.date.slice(5)}</div>
         <div class="fd-value">${d.value}${stripUnit}</div>
-        <div class="fd-range">${d.lower}–${d.upper}</div>
+        <div class="fd-range">${d.lower}-${d.upper}</div>
       </div>
     `).join("");
   } catch (err) {
@@ -232,7 +275,7 @@ async function loadPolicyPanel() {
   const statusEl = document.getElementById("grap-status");
   const barsEl = document.getElementById("source-bars");
   const noteEl = document.getElementById("policy-note");
-  barsEl.textContent = "Loading…";
+  barsEl.textContent = "Loading...";
   try {
     const data = await apiGet(`/policy/${currentCity}`);
 
@@ -242,17 +285,17 @@ async function loadPolicyPanel() {
         <div class="grap-step ${activeStage === ref.stage ? "current" : ""}">
           <span class="stage-num">${ref.stage}</span>
           <span class="stage-label">${ref.label}</span>
-          <span class="stage-range">AQI ${ref.aqi_range[0]}–${ref.aqi_range[1]}</span>
+          <span class="stage-range">AQI ${ref.aqi_range[0]}-${ref.aqi_range[1]}</span>
         </div>
       `).join("");
       statusEl.innerHTML = activeStage
-        ? `<span class="dot" style="color:var(--accent)"></span>Stage ${activeStage} in effect at AQI ${fmt(data.aqi_cpcb, 0)} — ${data.grap_stage.actions.join("; ")}`
-        : `<span class="dot"></span>AQI${data.aqi_cpcb != null ? " " + fmt(data.aqi_cpcb, 0) : ""} is below the GRAP Stage I threshold (201) — no mandatory stage in effect.`;
+        ? `<span class="dot" style="color:var(--accent)"></span>Stage ${activeStage} in effect at AQI ${fmt(data.aqi_cpcb, 0)} - ${data.grap_stage.actions.join("; ")}`
+        : `<span class="dot"></span>AQI${data.aqi_cpcb != null ? " " + fmt(data.aqi_cpcb, 0) : ""} is below the GRAP Stage I threshold (201) - no mandatory stage in effect.`;
     } else {
-      // GRAP is Delhi-NCR-specific policy machinery — show the national AQI
+      // GRAP is Delhi-NCR-specific policy machinery - show the national AQI
       // category instead of implying a framework that doesn't apply here.
       grapEl.innerHTML = "";
-      statusEl.innerHTML = `<span class="dot"></span>GRAP (CAQM) applies to Delhi-NCR only — not shown for ${data.city}. `
+      statusEl.innerHTML = `<span class="dot"></span>GRAP (CAQM) applies to Delhi-NCR only - not shown for ${data.city}. `
         + (data.aqi_category
            ? `National AQI category: <b>${data.aqi_category}</b>${data.aqi_cpcb != null ? ` (${fmt(data.aqi_cpcb, 0)})` : ""}.`
            : "AQI reading unavailable right now.");
@@ -265,13 +308,13 @@ async function loadPolicyPanel() {
           <span class="source-pct">${s.likelihood_pct}%</span>
         </div>
         <div class="source-bar-track"><div class="source-bar-fill" style="width:${s.likelihood_pct}%"></div></div>
-        <div class="source-detail"><b>Action:</b> ${s.short_term_actions[0] || "—"}</div>
+        <div class="source-detail"><b>Action:</b> ${s.short_term_actions[0] || "-"}</div>
       </div>
     `).join("");
 
     noteEl.textContent = data.used_generic_source_prior
       ? data.methodology_note + " No published city-specific source-apportionment study is encoded for "
-        + data.city + " — the shares above are generic indicative estimates, not a local study."
+        + data.city + " - the shares above are generic indicative estimates, not a local study."
       : data.methodology_note;
   } catch (err) {
     renderError(barsEl, err);

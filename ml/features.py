@@ -6,13 +6,13 @@ ONI (Oceanic Nino Index, NOAA CPC) is a monthly signal; hourly rows are joined t
 the ONI of their calendar month. Physical rationale for each ENSO feature:
 
   oni                : current SST anomaly. El Nino summers in India run hotter
-                       (weakened monsoon, reduced cloud cover) — direct heat-risk driver.
+                       (weakened monsoon, reduced cloud cover) - direct heat-risk driver.
   oni_lag_3m         : ENSO teleconnection to Indian monsoon acts with a lag; a
                        developing El Nino in spring predicts a deficient monsoon.
   enso_phase (0/1/2) : neutral / el_nino / la_nina categorical.
-  oni_x_monsoon      : ONI * is_monsoon_season interaction — the deficit-rainfall
+  oni_x_monsoon      : ONI * is_monsoon_season interaction - the deficit-rainfall
                        effect only expresses June-September.
-  oni_x_winter       : ONI * is_winter interaction — ENSO modulates winter
+  oni_x_winter       : ONI * is_winter interaction - ENSO modulates winter
                        ventilation/inversion strength over the Indo-Gangetic plain,
                        which drives PM2.5 accumulation episodes in Delhi.
 """
@@ -27,9 +27,16 @@ from pipeline.load import engine
 
 PHASE_CODE = {"neutral": 0, "el_nino": 1, "la_nina": 2}
 
+# How far ahead the risk classifier predicts. The score itself is a closed
+# form of the current hour's readings, so training on the *same* hour just
+# teaches the model to re-derive arithmetic we already have exactly. Shifting
+# the label forward makes it a real forecasting task the formula can't do.
+FORECAST_HORIZON_H = 24
+
 FEATURES = [
     # raw / derived weather
-    "temp_c", "humidity_pct", "heat_index_c", "wind_kph", "uv_index", "pressure_hpa",
+    "temp_c", "humidity_pct", "heat_index_c", "wbgt_c", "wind_kph",
+    "solar_wm2", "pressure_hpa",
     # pollution
     "pm25", "pm10", "no2", "o3", "aqi_cpcb",
     # temporal (cyclic)
@@ -38,7 +45,17 @@ FEATURES = [
     "temp_lag_1h", "pm25_lag_3h", "temp_roll_6h_mean", "pm25_roll_6h_max",
     # ENSO / El Nino block
     "oni", "oni_lag_3m", "enso_phase", "oni_x_monsoon", "oni_x_winter",
+    # Today's tier is the persistence baseline ("tomorrow looks like today").
+    # Handing it to the model as a feature means it starts from that baseline
+    # and learns corrections, rather than having to rediscover it. Uses only
+    # current-hour readings, so there's no leakage from the future label.
+    "risk_tier_now",
 ]
+# NOTE: uv_index is deliberately NOT a feature. Open-Meteo's archive endpoint
+# returns it as all-null, so every historical row would train on a constant
+# fill while live rows carry real values - a train/serve skew that makes the
+# feature worse than useless. solar_wm2 (shortwave radiation) is the real
+# solar signal and IS available historically.
 
 
 def load_joined(city_id: int) -> pd.DataFrame:
@@ -71,11 +88,10 @@ def add_features(df: pd.DataFrame) -> pd.DataFrame:
     df["month_sin"], df["month_cos"] = np.sin(2*np.pi*m/12), np.cos(2*np.pi*m/12)
     df["is_weekend"] = (df["ts"].dt.dayofweek >= 5).astype(int)
 
-    # Open-Meteo's archive endpoint never populates uv_index (only the forecast
-    # endpoint does), so every historical daytime row is NaN here. Without this
-    # fallback the final dropna in training_frame() silently discards all daytime
-    # history, training only on night hours and losing the peak-heat episodes.
-    df["uv_index"] = df["uv_index"].fillna(0)
+    # Solar radiation is genuinely 0 overnight; a null here means a gap, not
+    # darkness, but 0 is the safe fill for the handful of missing hours.
+    if "solar_wm2" in df:
+        df["solar_wm2"] = df["solar_wm2"].fillna(0)
 
     df["temp_lag_1h"] = df["temp_c"].shift(1)
     df["pm25_lag_3h"] = df["pm25"].shift(3)
@@ -90,16 +106,33 @@ def add_features(df: pd.DataFrame) -> pd.DataFrame:
     is_winter = m.isin([11, 12, 1]).astype(int)
     df["oni_x_monsoon"] = df["oni"] * is_monsoon
     df["oni_x_winter"] = df["oni"] * is_winter
+
+    # Current-hour risk tier: the persistence baseline, used both as a model
+    # feature and (shifted forward) as the training label. Computed here so
+    # serving builds it exactly the same way training does.
+    from ml.risk_score import compute_heat_risk_score
+    df["risk_tier_now"] = df.apply(
+        lambda r: _tier(compute_heat_risk_score(
+            r.get("temp_c"), r.get("humidity_pct"), r.get("aqi_cpcb"),
+            r.get("uv_index"), r.get("solar_wm2"))),
+        axis=1)
     return df
 
 
-def label_risk_tier(df: pd.DataFrame) -> pd.DataFrame:
-    """Supervision labels from the WBGT/WHO-anchored composite score (see ml/risk_score)."""
-    from ml.risk_score import compute_heat_risk_score
-    df["risk_tier"] = df.apply(
-        lambda r: _tier(compute_heat_risk_score(
-            r.get("temp_c"), r.get("humidity_pct"), r.get("aqi_cpcb"), r.get("uv_index"))),
-        axis=1)
+def label_risk_tier(df: pd.DataFrame, horizon_h: int = FORECAST_HORIZON_H) -> pd.DataFrame:
+    """Label each row with the risk tier `horizon_h` hours LATER.
+
+    Scoring the current hour would be circular - compute_heat_risk_score() is
+    a closed form of columns the model already receives as features, so the
+    classifier would just relearn arithmetic (and score a meaninglessly high
+    F1 doing it). Shifting the target forward asks a real question instead:
+    given conditions now, what will the risk tier be tomorrow?
+    """
+    # risk_tier_now is built in add_features(); rows are hourly and ordered,
+    # so a -horizon shift lines each row up with the tier that actually
+    # occurred that many hours later. The final horizon_h rows have no future
+    # to look at and drop out in training_frame().
+    df["risk_tier"] = df["risk_tier_now"].shift(-horizon_h)
     return df
 
 
@@ -111,4 +144,6 @@ def _tier(score: int | None) -> int:
 
 def training_frame(city_id: int) -> pd.DataFrame:
     df = label_risk_tier(add_features(load_joined(city_id)))
-    return df.dropna(subset=[f for f in FEATURES if f in df.columns] + ["risk_tier"])
+    df = df.dropna(subset=[f for f in FEATURES if f in df.columns] + ["risk_tier"])
+    df["risk_tier"] = df["risk_tier"].astype(int)
+    return df

@@ -1,0 +1,41 @@
+# Render blueprint for the ClimateSense API.
+#
+# Deploy: Render dashboard -> New -> Blueprint -> pick this repo.
+# Secrets (sync: false below) are entered once in the Render dashboard, never
+# committed here.
+#
+# Note on the free plan: the service sleeps after ~15 min idle, so the first
+# request after a quiet spell takes roughly 50s to wake. Subsequent requests
+# are normal speed.
+services:
+  - type: web
+    name: climatesense-api
+    runtime: python
+    plan: free
+    # Prophet and XGBoost publish wheels well ahead of the newest Python, so
+    # pin to 3.11 rather than letting Render pick a version that has to build
+    # Stan from source.
+    pythonVersion: "3.11"
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn api.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      # Postgres connection string (Supabase free tier works). Leave unset and
+      # the app falls back to local SQLite, which is per-instance and wiped on
+      # every redeploy - fine for a smoke test, not for real use.
+      - key: DATABASE_URL
+        sync: false
+      # Free key: https://aistudio.google.com/apikey
+      - key: GEMINI_API_KEY
+        sync: false
+      # Free token: https://aqicn.org/data-platform/token/
+      - key: AQICN_TOKEN
+        sync: false
+      # Comma-separated allowed origins, e.g.
+      #   https://<your-username>.github.io
+      - key: FRONTEND_URL
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-3.6-flash
+      - key: ASSISTANT_RATE_LIMIT
+        value: "15"

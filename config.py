@@ -4,7 +4,7 @@ from datetime import timezone, timedelta
 
 from dotenv import load_dotenv
 load_dotenv()  # loads .env into the process environment if present (no-op in prod, where
-                # real env vars are set directly — e.g. Render/GitHub Actions secrets)
+                # real env vars are set directly - e.g. Render/GitHub Actions secrets)
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
@@ -25,7 +25,7 @@ CITIES = {
 IGP_CITIES = {"Delhi", "Lucknow"}
 
 # GRAP (Graded Response Action Plan) is a CAQM policy framework legally
-# scoped to Delhi-NCR — it does not apply to other cities' AQI readings.
+# scoped to Delhi-NCR - it does not apply to other cities' AQI readings.
 GRAP_APPLICABLE_CITIES = {"Delhi"}
 
 # --- API endpoints (all free) ---
@@ -36,7 +36,7 @@ AQICN_FEED          = "https://api.waqi.info/feed/{slug}/"
 # NOAA CPC Oceanic Nino Index (3-month running mean SST anomaly, Nino 3.4)
 NOAA_ONI_URL        = "https://www.cpc.ncep.noaa.gov/data/indices/oni.ascii.txt"
 # NOAA CPC official probabilistic ENSO forecast (El Nino/Neutral/La Nina % per
-# season, next ~9 overlapping 3-month seasons). HTML page with a data table —
+# season, next ~9 overlapping 3-month seasons). HTML page with a data table -
 # no clean CSV/JSON is published, so pipeline/fetch.py regex-parses the table.
 NOAA_ENSO_OUTLOOK_URL = "https://www.cpc.ncep.noaa.gov/products/analysis_monitoring/enso/roni/probabilities/"
 
@@ -55,5 +55,9 @@ MODEL_DIR = os.getenv("MODEL_DIR", "ml/saved_models")
 OM_WEATHER_VARS = [
     "temperature_2m", "relative_humidity_2m", "wind_speed_10m",
     "wind_direction_10m", "uv_index", "precipitation", "surface_pressure",
+    # Solar radiation is the one solar variable the ARCHIVE endpoint actually
+    # returns (uv_index is forecast-only, always null historically). It drives
+    # the WBGT globe-temperature term and is the ML models' solar feature.
+    "shortwave_radiation",
 ]
 OM_AQ_VARS = ["pm2_5", "pm10", "nitrogen_dioxide", "ozone", "sulphur_dioxide", "carbon_monoxide"]

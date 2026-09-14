@@ -5,7 +5,7 @@
 Prophet
   - Daily-mean temp and PM2.5 forecasters per city.
   - Custom monsoon seasonality (period ~= 91 days).
-  - ONI added as an *extra regressor* — the explicit El Nino signal. Because ONI is a
+  - ONI added as an *extra regressor* - the explicit El Nino signal. Because ONI is a
     slow monthly index, its future values over a 7-day horizon are safely approximated
     by the latest published value (documented model assumption).
 
@@ -28,7 +28,8 @@ from sklearn.model_selection import TimeSeriesSplit
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import MODEL_DIR, CITIES
-from ml.features import training_frame, add_features, load_joined, FEATURES
+from ml.features import (training_frame, add_features, load_joined, FEATURES,
+                         FORECAST_HORIZON_H)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("train")
@@ -40,19 +41,28 @@ def train_prophet(city_id: int, target: str = "temp_c"):
     from prophet import Prophet
     from prophet.serialize import model_to_json
 
+    # PM2.5 is driven far more by ventilation (wind) and humidity than by
+    # calendar seasonality alone, so those join ONI as regressors for the
+    # pollution model. Temperature doesn't need them.
+    extra_regressors = ["wind_kph", "humidity_pct"] if target == "pm25" else []
+
     df = add_features(load_joined(city_id))
-    daily = (df.set_index("ts")[[target, "oni"]]
-               .resample("D").agg({target: "mean", "oni": "last"})
+    agg = {target: "mean", "oni": "last"}
+    agg.update({r: "mean" for r in extra_regressors})
+    daily = (df.set_index("ts")[[target, "oni"] + extra_regressors]
+               .resample("D").agg(agg)
                .dropna().reset_index()
                .rename(columns={"ts": "ds", target: "y"}))
     if len(daily) < 200:
-        raise RuntimeError(f"Only {len(daily)} daily rows — seed more history first")
+        raise RuntimeError(f"Only {len(daily)} daily rows - seed more history first")
 
     m = Prophet(seasonality_mode="multiplicative", changepoint_prior_scale=0.05,
                 interval_width=0.80, yearly_seasonality=True,
                 weekly_seasonality=True, daily_seasonality=False)
     m.add_seasonality(name="monsoon", period=91.25, fourier_order=5)
     m.add_regressor("oni")                       # <-- El Nino signal
+    for r in extra_regressors:
+        m.add_regressor(r)
     m.fit(daily)
 
     # Walk-forward validation
@@ -83,8 +93,24 @@ def forecast_prophet(city_id: int, target: str = "temp_c", days: int = 7) -> pd.
     hist = add_features(load_joined(city_id))
     last_oni = float(hist["oni"].dropna().iloc[-1]) if hist["oni"].notna().any() else 0.0
     future["oni"] = last_oni
+    # Same carry-forward for any meteorological regressors this model was fit
+    # with - recent-week means, which beat a single noisy last reading.
+    for r in getattr(m, "extra_regressors", {}):
+        if r == "oni" or r in future:
+            continue
+        recent = hist[r].dropna().tail(24 * 7)
+        future[r] = float(recent.mean()) if len(recent) else 0.0
     fc = m.predict(future).tail(days)
     return fc[["ds", "yhat", "yhat_lower", "yhat_upper"]]
+
+
+def forecast_metrics(city_id: int, target: str = "temp_c") -> dict | None:
+    """MAE/RMSE recorded at training time, for display alongside a forecast."""
+    path = os.path.join(MODEL_DIR, f"prophet_{target}_city{city_id}_metrics.json")
+    if not os.path.exists(path):
+        return None
+    with open(path) as f:
+        return json.load(f)
 
 
 # ------------------------------- XGBoost ------------------------------------
@@ -94,8 +120,13 @@ def train_xgboost(city_id: int):
     df = training_frame(city_id)
     feats = [f for f in FEATURES if f in df.columns]
     X, y = df[feats], df["risk_tier"].astype(int)
-    logger.info("XGBoost training rows=%d features=%d tiers=%s",
-                len(X), len(feats), y.value_counts().to_dict())
+    logger.info("XGBoost training rows=%d features=%d target=risk tier +%dh tiers=%s",
+                len(X), len(feats), FORECAST_HORIZON_H, y.value_counts().to_dict())
+    # Persistence baseline: "tomorrow looks like right now". The model has to
+    # beat this to be worth anything - same-hour labels made that trivially
+    # true, a +24h target does not. Scored on the SAME walk-forward folds as
+    # the model, otherwise the comparison is meaningless.
+    persistence = df["risk_tier_now"].astype(int).reset_index(drop=True)
 
     # objective/num_class are deliberately NOT pinned here: an early walk-forward
     # fold can legitimately contain fewer than 4 risk tiers (HIGH/CRITICAL are rare
@@ -104,13 +135,13 @@ def train_xgboost(city_id: int):
     # argmax'd labels, breaking f1_score. Letting XGBoost infer objective/num_class
     # per fit keeps predict() shape consistent with whatever labels that fit saw.
     tscv = TimeSeriesSplit(n_splits=5)
-    scores, model = [], None
+    scores, baseline_scores, model = [], [], None
     all_tiers = sorted(y.unique())
     tier_names = [["SAFE", "MODERATE", "HIGH", "CRITICAL"][t] for t in all_tiers]
     for tr, va in tscv.split(X):
         y_tr, y_va = y.iloc[tr], y.iloc[va]
         # A chronologically early fold can be single-class (e.g. an all-SAFE
-        # stretch) — not enough signal to fit or score a fold like that.
+        # stretch) - not enough signal to fit or score a fold like that.
         if y_tr.nunique() < 2:
             continue
         # HIGH/CRITICAL are rare and can appear in the validation slice before
@@ -118,7 +149,7 @@ def train_xgboost(city_id: int):
         # set's labels to fit inside the fitted class space, and "mlogloss" only
         # makes sense once XGBoost has actually inferred a multi-class objective
         # (a 2-class fold auto-picks binary:logistic, for which mlogloss hard-
-        # crashes) — skip eval_set/early stopping whenever either doesn't hold.
+        # crashes) - skip eval_set/early stopping whenever either doesn't hold.
         can_eval = set(y_va.unique()) <= set(y_tr.unique()) and y_tr.nunique() >= 3
         model = xgb.XGBClassifier(
             n_estimators=400, max_depth=7, learning_rate=0.02,
@@ -130,10 +161,13 @@ def train_xgboost(city_id: int):
         else:
             model.fit(X.iloc[tr], y_tr)
         scores.append(f1_score(y_va, model.predict(X.iloc[va]), average="weighted"))
+        baseline_scores.append(f1_score(y_va, persistence.iloc[va], average="weighted"))
     if not scores:
-        raise RuntimeError("Every walk-forward fold was single-class — seed more history")
-    logger.info("XGBoost walk-forward F1(weighted)=%.3f +/- %.3f",
-                np.mean(scores), np.std(scores))
+        raise RuntimeError("Every walk-forward fold was single-class - seed more history")
+    logger.info("Persistence baseline F1(weighted)=%.3f  (same folds)",
+                np.mean(baseline_scores))
+    logger.info("XGBoost walk-forward F1(weighted)=%.3f +/- %.3f  (lift vs baseline %+.3f)",
+                np.mean(scores), np.std(scores), np.mean(scores) - np.mean(baseline_scores))
     logger.info("\n%s", classification_report(
         y.iloc[va], model.predict(X.iloc[va]),
         labels=all_tiers, target_names=tier_names, zero_division=0))
@@ -142,7 +176,9 @@ def train_xgboost(city_id: int):
                                  if k not in ("early_stopping_rounds", "objective", "num_class")})
     final.fit(X, y)
     bundle = {"model": final, "features": feats,
-              "cv_f1_mean": float(np.mean(scores)), "cv_f1_std": float(np.std(scores))}
+              "horizon_h": FORECAST_HORIZON_H,
+              "cv_f1_mean": float(np.mean(scores)), "cv_f1_std": float(np.std(scores)),
+              "baseline_f1_mean": float(np.mean(baseline_scores))}
     joblib.dump(bundle, os.path.join(MODEL_DIR, f"xgb_risk_city{city_id}.pkl"))
     return final
 
