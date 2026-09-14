@@ -1,10 +1,6 @@
-// Set this to your deployed Render backend URL (e.g. "https://climatesense-api.onrender.com").
-// Defaults to localhost for local development against `uvicorn api.main:app --port 8000`.
-// Backend URL. Paste your deployed Render URL here once (no trailing slash):
-//   const PROD_API = "https://climatesense-api.onrender.com";
-// Local development keeps using localhost automatically, so the same commit
-// works in both places and there's nothing to edit per deploy.
-const PROD_API = "";   // <-- set this after deploying the backend
+// Deployed backend. Local development falls back to localhost automatically,
+// so the same commit works in both places with nothing to edit per deploy.
+const PROD_API = "https://climatesense-api.onrender.com";
 
 const IS_LOCAL = ["localhost", "127.0.0.1", ""].includes(location.hostname);
 const API_BASE = IS_LOCAL ? "http://localhost:8000" : PROD_API;
